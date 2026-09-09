@@ -1,0 +1,58 @@
+name: Socket dependency policy
+
+on:
+  workflow_call:
+    inputs:
+      manifest-path:
+        description: Manifest whose committed lockfile must pass Socket policy
+        type: string
+        default: Cargo.toml
+      ref:
+        description: Optional ref for a source-built benchmark baseline
+        type: string
+        default: ""
+    outputs:
+      commit:
+        description: Exact commit checked by the gate
+        value: ${{ jobs.check.outputs.commit }}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  check:
+    name: Check locked dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      commit: ${{ steps.checkout.outputs.commit }}
+    env:
+      RUSTC_WRAPPER: ""
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@09dddc697b1c8c1d3c3733b41d6fdd2274f17734
+        with:
+          egress-policy: audit
+      - name: Checkout repository
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+      - name: Check dependencies without compiling or restoring caches
+        env:
+          MANIFEST_PATH: ${{ inputs.manifest-path }}
+        run: |
+          test -f "$(dirname "$MANIFEST_PATH")/Cargo.lock"
+          export CARGO_HOME
+          CARGO_HOME="$(mktemp -d "$RUNNER_TEMP/socket-cargo-XXXXXX")"
+          cargo_binary="$(rustup which cargo)"
+          "$SFW_SHIM_DIR/cargo" fetch --locked --manifest-path "$MANIFEST_PATH"
+          # Socket can leave an incomplete fetch after a network error. Fail closed.
+          "$cargo_binary" fetch --frozen --manifest-path "$MANIFEST_PATH"

@@ -29,10 +29,13 @@ env:
   RUST_MIN_STACK: 4194304 # 2 * the default (2 * 1024 * 1024)
 
 jobs:
-  cargo-cooldown:
+  bindings-dependencies:
     permissions:
+      id-token: write
       contents: read
-    uses: ./.github/workflows/cargo-cooldown.yml
+    uses: ./.github/workflows/socket-dependencies.yml
+    with:
+      manifest-path: crates/forge/tests/fixtures/bind-lock/Cargo.toml
 
   matrices:
     name: build matrices
@@ -65,7 +68,7 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
-    needs: [cargo-cooldown, matrices]
+    needs: [bindings-dependencies, matrices]
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.matrices.outputs.test-matrix) }}

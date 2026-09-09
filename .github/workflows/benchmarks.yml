@@ -19,14 +19,23 @@ env:
   RUSTC_WRAPPER: "sccache"
 
 jobs:
-  cargo-cooldown:
+  socket-dependencies:
     permissions:
       contents: read
-    uses: ./.github/workflows/cargo-cooldown.yml
+      id-token: write
+    uses: ./.github/workflows/socket-dependencies.yml
+
+  baseline-dependencies:
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/socket-dependencies.yml
+    with:
+      ref: master
 
   run-benchmarks:
     name: Run All Benchmarks
-    needs: cargo-cooldown
+    needs: [socket-dependencies, baseline-dependencies]
     runs-on: depot-ubuntu-24.04-32
     permissions:
       contents: read
@@ -63,21 +72,17 @@ jobs:
         id: prep
         env:
           GH_TOKEN: ${{ github.token }}
+          BASELINE_SHA: ${{ needs.baseline-dependencies.outputs.commit }}
           REQUESTED_VERSIONS: ${{ github.event.inputs.versions || env.DEFAULT_VERSIONS }}
         run: |
           compact="${REQUESTED_VERSIONS//[[:space:]]/}"
           if [[ ",$compact," == *,local,* ]]; then
-            git fetch --no-tags origin master:refs/remotes/origin/master
-            base_sha="$(git rev-parse origin/master)"
+            git fetch --no-tags origin "$BASELINE_SHA"
+            base_sha="$BASELINE_SHA"
             candidate_sha="$(git rev-parse HEAD)"
             git worktree add --detach ../foundry-baseline "$base_sha"
             echo "versions=master=../foundry-baseline,local" >> "$GITHUB_OUTPUT"
             echo "is_source_comparison=true" >> "$GITHUB_OUTPUT"
-            if [[ -f ../foundry-baseline/cooldown.toml ]]; then
-              echo "baseline_strict_project_config=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "baseline_strict_project_config=false" >> "$GITHUB_OUTPUT"
-            fi
             printf '%s' "$base_sha" > benches/baseline-ref.txt
             printf '%s' "$candidate_sha" > benches/candidate-ref.txt
             git rev-list --count "${candidate_sha}..${base_sha}" > benches/behind-count.txt
@@ -92,15 +97,6 @@ jobs:
             echo "versions=$REQUESTED_VERSIONS" >> "$GITHUB_OUTPUT"
             echo "is_source_comparison=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Enforce baseline Cargo dependency cooldown
-        if: steps.prep.outputs.is_source_comparison == 'true'
-        uses: tempoxyz/gh-actions/actions/cargo-cooldown@0aa93238d85fd085d7901320b670cc6adb7a02f3
-        env:
-          RUSTC_WRAPPER: ""
-        with:
-          strict-project-config: ${{ steps.prep.outputs.baseline_strict_project_config }}
-          working-directory: ../foundry-baseline
 
       - uses: rui314/setup-mold@7e4f20ad28a2e8ca6fd0892ccf72e2abb706b9c3 # v1
 
