@@ -66,7 +66,7 @@ jobs:
           frozen_status=$?
           set -e
           export FETCH_STATUS="$fetch_status" FROZEN_STATUS="$frozen_status"
-          # Never copy raw reports, URLs, environment variables, or error messages into artifacts.
+          # Keep the summary limited to counts, timings, and error codes.
           node <<'NODE'
           const fs = require('node:fs');
           const { createHash } = require('node:crypto');
@@ -105,5 +105,24 @@ jobs:
         with:
           name: ${{ steps.fetch.outputs.artifact-name }}
           path: ${{ steps.fetch.outputs.summary-path }}
+          if-no-files-found: error
+          retention-days: 3
+      - name: Locate Socket report
+        id: report
+        if: ${{ always() }}
+        run: |
+          if [ -n "${SFW_JSON_REPORT_PATH:-}" ] && [ -f "$SFW_JSON_REPORT_PATH" ]; then
+            echo "path=$SFW_JSON_REPORT_PATH" >> "$GITHUB_OUTPUT"
+            echo "artifact-name=socket-report-$(basename "$SFW_JSON_REPORT_PATH" .json)" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Socket did not produce a report file."
+          fi
+      - name: Upload Socket report
+        if: ${{ always() && steps.report.outputs.path != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.report.outputs.artifact-name }}
+          # Upload only the report, never the temporary directory or fetch log.
+          path: ${{ steps.report.outputs.path }}
           if-no-files-found: error
           retention-days: 3
