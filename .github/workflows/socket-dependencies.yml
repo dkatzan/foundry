@@ -46,6 +46,7 @@ jobs:
         with:
           toolchain: stable
       - name: Check dependencies without compiling or restoring caches
+        id: fetch
         env:
           MANIFEST_PATH: ${{ inputs.manifest-path }}
         run: |
@@ -53,6 +54,54 @@ jobs:
           export CARGO_HOME
           CARGO_HOME="$(mktemp -d "$RUNNER_TEMP/socket-cargo-XXXXXX")"
           cargo_binary="$(rustup which cargo)"
-          "$SFW_SHIM_DIR/cargo" fetch --locked --manifest-path "$MANIFEST_PATH"
+          export SUMMARY_DIR SUMMARY_STARTED_AT SFW_BINARY
+          SUMMARY_DIR="$(mktemp -d "$RUNNER_TEMP/socket-summary-XXXXXX")"
+          SUMMARY_STARTED_AT="$(date -u +%FT%TZ)"
+          SFW_BINARY="$(command -v sfw)"
+          set +e
+          "$SFW_SHIM_DIR/cargo" fetch --locked --manifest-path "$MANIFEST_PATH" 2>&1 | tee "$SUMMARY_DIR/fetch.log"
+          fetch_status=${PIPESTATUS[0]}
           # Socket can leave an incomplete fetch after a network error. Fail closed.
           "$cargo_binary" fetch --frozen --manifest-path "$MANIFEST_PATH"
+          frozen_status=$?
+          set -e
+          export FETCH_STATUS="$fetch_status" FROZEN_STATUS="$frozen_status"
+          # Never copy raw reports, URLs, environment variables, or error messages into artifacts.
+          node <<'NODE'
+          const fs = require('node:fs');
+          const { createHash } = require('node:crypto');
+          const log = fs.readFileSync(`${process.env.SUMMARY_DIR}/fetch.log`, 'utf8');
+          let report, reportStatus = 'missing';
+          try {
+            report = JSON.parse(fs.readFileSync(process.env.SFW_JSON_REPORT_PATH, 'utf8'));
+            reportStatus = 'parsed';
+          } catch (error) {
+            if (error.code !== 'ENOENT' && process.env.SFW_JSON_REPORT_PATH) reportStatus = 'invalid';
+          }
+          const summary = {
+            started_at: process.env.SUMMARY_STARTED_AT,
+            finished_at: new Date().toISOString(),
+            socket_binary_sha256: createHash('sha256').update(fs.readFileSync(process.env.SFW_BINARY)).digest('hex'),
+            fetch_exit_code: Number(process.env.FETCH_STATUS),
+            frozen_fetch_exit_code: Number(process.env.FROZEN_STATUS),
+            error_codes: ['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'].filter(code => log.includes(code)),
+            socket_unexpected_error: log.includes('Socket Firewall encountered an unexpected error'),
+            report_status: reportStatus,
+            blocked_count: Array.isArray(report?.blocked) ? report.blocked.length : null,
+            parse_failure_count: Array.isArray(report?.parseFail) ? report.parseFail.length : null,
+            note: 'Counts and exit codes alone do not prove policy approval; raw diagnostics are excluded.',
+          };
+          fs.writeFileSync(`${process.env.SUMMARY_DIR}/summary.json`, `${JSON.stringify(summary, null, 2)}\n`);
+          NODE
+          echo "summary-path=$SUMMARY_DIR/summary.json" >> "$GITHUB_OUTPUT"
+          echo "artifact-name=$(basename "$SUMMARY_DIR")" >> "$GITHUB_OUTPUT"
+          if [ "$fetch_status" -ne 0 ]; then exit "$fetch_status"; fi
+          exit "$frozen_status"
+      - name: Upload sanitized Socket summary
+        if: ${{ always() && steps.fetch.outputs.summary-path != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.fetch.outputs.artifact-name }}
+          path: ${{ steps.fetch.outputs.summary-path }}
+          if-no-files-found: error
+          retention-days: 3
