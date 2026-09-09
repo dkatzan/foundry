@@ -43,6 +43,9 @@ jobs:
           toolchain: stable
       - name: Check dependencies without compiling or restoring caches
         shell: bash
+        env:
+          # Temporary workaround for Socket's dual-stack connection timeouts.
+          NODE_OPTIONS: --no-network-family-autoselection
         run: |
           test -f Cargo.lock
           export CARGO_HOME
