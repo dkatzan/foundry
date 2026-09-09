@@ -95,6 +95,8 @@ jobs:
           NODE
           echo "summary-path=$SUMMARY_DIR/summary.json" >> "$GITHUB_OUTPUT"
           echo "artifact-name=$(basename "$SUMMARY_DIR")" >> "$GITHUB_OUTPUT"
+          # Socket can return zero after an internal error, even with a complete cache.
+          jq -e '.socket_unexpected_error == false' "$SUMMARY_DIR/summary.json" > /dev/null
           if [ "$fetch_status" -ne 0 ]; then exit "$fetch_status"; fi
           exit "$frozen_status"
       - name: Upload sanitized Socket summary
