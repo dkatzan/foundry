@@ -4718,7 +4718,8 @@ Bindings have been generated to [..]
     let bindings_path = prj.root().join("out/bindings");
 
     assert!(bindings_path.exists(), "Bindings directory should exist");
-    let out = super::bind::bindings_cargo(&bindings_path, "build")
+    let out = super::bind::bindings_cargo(&bindings_path)
+        .arg("build")
         .output()
         .expect("Failed to run cargo build");
 

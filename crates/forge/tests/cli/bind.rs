@@ -2,38 +2,19 @@ use foundry_compilers::utils::read_json_file;
 use foundry_config::SolcReq;
 use foundry_test_utils::{TestProject, cargo_profile_dir};
 use std::{fs, path::Path, process::Command};
-use toml_edit::DocumentMut;
 
 // Keep each generated crate isolated while reusing its dependencies across binding tests.
 // Cargo locks the shared target directory across nextest processes and fingerprints each crate.
-pub(super) fn bindings_cargo(bindings_path: &Path, command: &str) -> Command {
-    let manifest = fs::read_to_string(bindings_path.join("Cargo.toml"))
-        .unwrap()
-        .parse::<DocumentMut>()
-        .unwrap();
-    let mut lock = include_str!("../fixtures/bind-lock/Cargo.lock").parse::<DocumentMut>().unwrap();
-    // Preserve locked versions and checksums; prune only unused direct dependencies.
-    let package = lock["package"]
-        .as_array_of_tables_mut()
-        .unwrap()
-        .iter_mut()
-        .find(|package| package["name"].as_str() == Some("foundry-contracts"))
-        .unwrap();
-    package["dependencies"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|dependency| manifest["dependencies"].get(dependency.as_str().unwrap()).is_some());
-    fs::write(bindings_path.join("Cargo.lock"), lock.to_string()).unwrap();
+pub(super) fn bindings_cargo(bindings_path: &Path) -> Command {
     let mut cmd = Command::new("cargo");
-    cmd.args([command, "--locked"])
-        .current_dir(bindings_path)
+    cmd.current_dir(bindings_path)
         .env("CARGO_TARGET_DIR", cargo_profile_dir().join("bind-test-target"));
     cmd
 }
 
 fn assert_bindings_compile(bindings_path: &Path) {
-    let out = bindings_cargo(bindings_path, "check")
-        .arg("--tests")
+    let out = bindings_cargo(bindings_path)
+        .args(["check", "--tests"])
         .output()
         .expect("failed to run cargo check");
 

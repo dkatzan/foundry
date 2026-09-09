@@ -27,7 +27,6 @@ jobs:
     needs: socket-dependencies
     uses: ./.github/workflows/test.yml
     permissions:
-      id-token: write
       contents: read
     with:
       profile: default
